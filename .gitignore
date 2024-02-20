@@ -3,3 +3,6 @@
 /__pycache__
 /test_code.py
 .DS_Store
+build
+dist
+*.egg-info
