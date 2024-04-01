@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import json
 import time
 import websockets
@@ -14,7 +15,8 @@ class ConnectWebsocket:
     MAX_RECONNECTS = 5
     MAX_RECONNECT_SECONDS = 60
 
-    def __init__(self, loop, client, callback, private=False,sock=None):
+    def __init__(self, loop, client, callback, private=False,sock=None,address=None):
+        logger.debug("Connecting websocket")
         self._loop = loop
         self._client = client
         self._callback = callback
@@ -26,6 +28,7 @@ class ConnectWebsocket:
         self._socket = None
         self._topics = []
         self._sock=sock
+        self._address = address
         asyncio.ensure_future(self.run_forever(), loop=self._loop)
 
     @property
@@ -33,16 +36,32 @@ class ConnectWebsocket:
         return self._topics
 
     async def _run(self, event: asyncio.Event):
+        logger.debug("_run")
         keep_alive = True
         self._last_ping = time.time()  # record last ping
         self._ws_details = None
         self._ws_details = self._client.get_ws_token(self._private)
         logger.debug(self._ws_details)
 
-        async with websockets.connect(self.get_ws_endpoint(), ssl=self.get_ws_encryption(),sock=self._sock, 
-                                      server_hostname=urllib.parse.urlparse('https://openapi-v2.kucoin.com').hostname) as socket:
-            self._socket = socket
+        # open a new socket each time as old socket can't be used anymore
+        sock = self._sock
+        if sock is None:
+            logger.debug(f"Creating socket for address {self._address}")
+            if self._address is None:
+                logger.error("Address is None but no socket is provided!")
+                raise Exception("No address provided!")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.connect(self._address)
+
+        # get url
+        url = self._address[0] if 'https' in self._address[0] else 'https://' + self._address[0]
+
+        # connect
+        async with websockets.connect(self.get_ws_endpoint(), ssl=self.get_ws_encryption(),sock=sock, server_hostname=urllib.parse.urlparse(url).hostname) as s:
+            self._socket = s
             self._reconnect_num = 0
+            logger.debug(f"Connected to {url}")
 
             if not event.is_set():
                 await self.send_ping()
@@ -54,6 +73,7 @@ class ConnectWebsocket:
                 try:
                     _msg = await asyncio.wait_for(self._socket.recv(), timeout=self.get_ws_pingtimeout())
                 except asyncio.TimeoutError:
+                    logger.warning("TimeoutError, pinging again...")
                     await self.send_ping()
                 except asyncio.CancelledError:
                     logger.exception('CancelledError')
@@ -62,6 +82,7 @@ class ConnectWebsocket:
                     try:
                         msg = json.loads(_msg)
                     except ValueError:
+                        logger.debug("ValueError")
                         logger.warning(_msg)
                     else:
                         await self._callback(msg)

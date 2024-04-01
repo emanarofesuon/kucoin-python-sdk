@@ -16,7 +16,7 @@ class KucoinWsClient:
         self._topics = set()
 
     @classmethod
-    async def create(cls, loop, client, callback, private=False,sock=None):
+    async def create(cls, loop, client, callback, private=False, sock=None, address=None):
         self = KucoinWsClient()
         loop = loop if loop else asyncio.get_running_loop()
         self._loop = loop
@@ -24,7 +24,8 @@ class KucoinWsClient:
         self._private = private
         self._callback = callback
         self._sock=sock
-        self._conn = ConnectWebsocket(loop, self._client, self._recv, private,sock)
+        self._address = address
+        self._conn = ConnectWebsocket(loop, self._client, self._recv, private,sock,address)
         return self
 
     async def _recv(self, msg):
